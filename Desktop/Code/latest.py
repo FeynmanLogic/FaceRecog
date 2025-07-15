@@ -5,7 +5,7 @@ import datetime
 import numpy as np
 import pickle
 
-# ========== STEP 1: Set Up Database ==========
+# ========== DB SETUP ==========
 conn = sqlite3.connect("face_recognition.db")
 cursor = conn.cursor()
 
@@ -28,58 +28,62 @@ CREATE TABLE IF NOT EXISTS logs (
 
 conn.commit()
 
-# ========== STEP 2: Load Encodings from DB ==========
+# ========== LOAD ENCODINGS FROM DB ==========
 def load_known_faces():
     cursor.execute("SELECT name, encoding FROM known_faces")
     rows = cursor.fetchall()
     names = []
     encodings = []
     for name, encoding_blob in rows:
-        encoding = pickle.loads(encoding_blob)
-        names.append(name)
-        encodings.append(encoding)
+        try:
+            encoding = pickle.loads(encoding_blob)
+            names.append(name)
+            encodings.append(encoding)
+        except:
+            continue
     return names, encodings
-
-# ========== STEP 3: Main Loop ==========
-video_capture = cv2.VideoCapture("rtsp://user:user%40123@202.53.92.62:8081/cam/realmonitor?channel=10&subtype=0")  # Replace 0 with RTSP link if needed
-print("📷 Starting live feed. Press 'Q' to quit.")
 
 known_names, known_encodings = load_known_faces()
 
+# ========== CAMERA SETUP ==========
+video_capture = cv2.VideoCapture(0)  # Change to RTSP if needed
+print("📡 RTSP feed connected. Press Q to quit.")
+
+seen_face_ids = set()
+
 while True:
     ret, frame = video_capture.read()
+    if not ret:
+        print("❌ Failed to grab frame.")
+        break
 
-    if not ret or frame is None:
-        print("⚠️ Failed to grab frame. Skipping...")
-        continue
+    # Resize frame to 50% for performance and accuracy
+    small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+    rgb_small_frame = small_frame[:, :, ::-1]
 
-    # Make sure the frame is 3-channel 8-bit (RGB compatible)
-    if frame.ndim != 3 or frame.shape[2] != 3 or frame.dtype != np.uint8:
-        print("⚠️ Invalid frame format. Skipping...")
-        continue
-
-    try:
-        small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
-        rgb_small = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
-    except Exception as e:
-        print(f"⚠️ Error processing frame: {e}")
-        continue
-
-    face_locations = face_recognition.face_locations(rgb_small)
-    face_encodings = face_recognition.face_encodings(rgb_small, face_locations)
+    # Face recognition
+    face_locations = face_recognition.face_locations(rgb_small_frame, model="hog")
+    face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
 
     for face_encoding, face_location in zip(face_encodings, face_locations):
-        matches = face_recognition.compare_faces(known_encodings, face_encoding, tolerance=0.5)
+        matches = face_recognition.compare_faces(known_encodings, face_encoding, tolerance=0.45)
         name = "Unknown"
 
         if True in matches:
             match_index = matches.index(True)
             name = known_names[match_index]
         else:
-            # Prompt user to label the face
-            cv2.imshow("Unknown Face - Label It", frame)
-            print("\n🆕 New face detected. Enter name for the new person (or leave blank to skip):")
+            # Prevent repeat unknowns in same session
+            face_id = tuple(np.round(face_encoding, 2))
+            if face_id in seen_face_ids:
+                continue
+            seen_face_ids.add(face_id)
+
+            # Prompt to label
+            cv2.imshow("Unknown Face", frame)
+            print("🆕 Unknown face detected. Enter name or leave blank to skip:")
             new_name = input("Name: ").strip()
+            cv2.destroyWindow("Unknown Face")
 
             if new_name:
                 name = new_name
@@ -88,7 +92,6 @@ while True:
                 cursor.execute("INSERT INTO known_faces (name, encoding, time_added) VALUES (?, ?, ?)",
                                (name, encoded_blob, time_added))
                 conn.commit()
-
                 known_names.append(name)
                 known_encodings.append(face_encoding)
 
@@ -97,8 +100,8 @@ while True:
         cursor.execute("INSERT INTO logs (name, time_identified) VALUES (?, ?)", (name, time_identified))
         conn.commit()
 
-        # Draw box and label
-        top, right, bottom, left = [v * 4 for v in face_location]
+        # Draw box (scale coords)
+        top, right, bottom, left = [v * 2 for v in face_location]
         cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
         cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
 

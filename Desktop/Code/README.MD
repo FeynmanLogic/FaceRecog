@@ -5,3 +5,10 @@ Task is to make a CCTV based identification of faces, store those faces in a dat
 We will be using FlowCV, face-recognition packages.
 FlowCV will be for capturing video, face-recognition is self-explanatory.
 We will be using sqlite3 for database purposes.
+
+## Issues encountered
+<ul>
+<li> Only old version of numpy works
+<li> Need to build wheel for dlib
+<li> Need proper RTSP config
+</ul>
