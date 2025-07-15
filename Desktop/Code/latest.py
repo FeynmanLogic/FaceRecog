@@ -46,6 +46,7 @@ def load_known_faces():
 known_names, known_encodings = load_known_faces()
 
 # ========== CAMERA SETUP ==========
+rtsp_url="rtsp://user:user%40123@202.53.92.62:8081/cam/realmonitor?channel=10&subtype=0"
 video_capture = cv2.VideoCapture(0)  # Change to RTSP if needed
 print("📡 RTSP feed connected. Press Q to quit.")
 
@@ -62,7 +63,7 @@ while True:
     rgb_small_frame = small_frame[:, :, ::-1]
 
     # Face recognition
-    face_locations = face_recognition.face_locations(rgb_small_frame, model="hog")
+    face_locations = face_recognition.face_locations(rgb_small_frame, model="cnn")
     face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
 
     for face_encoding, face_location in zip(face_encodings, face_locations):

@@ -11,4 +11,6 @@ We will be using sqlite3 for database purposes.
 <li> Only old version of numpy works
 <li> Need to build wheel for dlib
 <li> Need proper RTSP config
+<li> If person side ways or wearing a cap or some obstruction it is not working
+<li> CNN too slow.
 </ul>
