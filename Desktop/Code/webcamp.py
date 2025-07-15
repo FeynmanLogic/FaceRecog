@@ -1,10 +1,12 @@
 import cv2
 import face_recognition
 import sqlite3
-import pickle
 import datetime
+import numpy as np
+import pickle
+import time
 
-# ========== Setup DB ==========
+# ========== DB SETUP ==========
 conn = sqlite3.connect("face_recognition.db")
 cursor = conn.cursor()
 
@@ -24,8 +26,10 @@ CREATE TABLE IF NOT EXISTS logs (
     time_identified TEXT
 )
 ''')
+
 conn.commit()
 
+# ========== LOAD ENCODINGS FROM DB ==========
 def load_known_faces():
     cursor.execute("SELECT name, encoding FROM known_faces")
     rows = cursor.fetchall()
@@ -37,63 +41,78 @@ def load_known_faces():
             names.append(name)
             encodings.append(encoding)
         except Exception as e:
-            print(f"❌ Failed to load encoding for {name}: {e}")
+            print("Error loading face:", e)
+            continue
     return names, encodings
 
-
-# ========== Start Webcam ==========
-video = cv2.VideoCapture(0)
-print("📷 Webcam started. Press Q to quit.")
 known_names, known_encodings = load_known_faces()
 
+# ========== CAMERA SETUP ==========
+rtsp_url = "rtsp://user:user%40123@202.53.92.62:8081/cam/realmonitor?channel=10&subtype=0"
+video_capture = cv2.VideoCapture(rtsp_url)
+print("📡 RTSP feed connected. Press Q to quit.")
+
+seen_face_ids = set()
+
+# ========== MAIN LOOP ==========
 while True:
-    ret, frame = video.read()
-    if not ret:
+    ret, frame = video_capture.read()
+    if not ret or frame is None or frame.shape[0] < 50:
+        print("❌ Failed to grab frame or frame too small.")
+        time.sleep(1)
         continue
 
-    # Resize + Convert to RGB
-    small = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
-    rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+    rgb_frame = frame[:, :, ::-1]  # Convert BGR to RGB
 
-    # Detect and Encode
-    locations = face_recognition.face_locations(rgb)
-    encodings = face_recognition.face_encodings(rgb, locations)
+    # Detect faces using CNN
+    face_locations = face_recognition.face_locations(rgb_frame, model="hog")
+    face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
 
-    for encoding, loc in zip(encodings, locations):
-        matches = face_recognition.compare_faces(known_encodings, encoding, tolerance=0.5)
+    for face_encoding, face_location in zip(face_encodings, face_locations):
+        matches = face_recognition.compare_faces(known_encodings, face_encoding, tolerance=0.45)
         name = "Unknown"
 
         if True in matches:
-            name = known_names[matches.index(True)]
+            match_index = matches.index(True)
+            name = known_names[match_index]
         else:
-            cv2.imshow("Label Unknown Face", frame)
-            print("🆕 New face. Enter name (or leave blank):")
+            face_id = tuple(np.round(face_encoding, 2))
+            if face_id in seen_face_ids:
+                continue
+            seen_face_ids.add(face_id)
+
+            # Show prompt only once per face
+            print("🆕 Unknown face detected. Enter name or leave blank to skip:")
+            cv2.imshow("Unknown Face", frame)
             new_name = input("Name: ").strip()
+            cv2.destroyWindow("Unknown Face")
+
             if new_name:
                 name = new_name
-                blob = pickle.dumps(encoding)
+                encoded_blob = pickle.dumps(face_encoding)
                 time_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 cursor.execute("INSERT INTO known_faces (name, encoding, time_added) VALUES (?, ?, ?)",
-                               (name, blob, time_added))
+                               (name, encoded_blob, time_added))
                 conn.commit()
                 known_names.append(name)
-                known_encodings.append(encoding)
+                known_encodings.append(face_encoding)
 
-        # Log Recognition
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cursor.execute("INSERT INTO logs (name, time_identified) VALUES (?, ?)", (name, timestamp))
+        # Log recognition
+        time_identified = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute("INSERT INTO logs (name, time_identified) VALUES (?, ?)", (name, time_identified))
         conn.commit()
 
-        # Draw Label
-        top, right, bottom, left = [v * 4 for v in loc]
+        # Draw rectangle
+        top, right, bottom, left = face_location
         cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-        cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
+        cv2.putText(frame, name, (left, top - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
 
-    cv2.imshow("Webcam Face Recognition", frame)
+    # Display video
+    cv2.imshow("Live Feed", frame)
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    if cv2.waitKey(1) & 0xFF == ord("q"):
         break
 
-video.release()
+video_capture.release()
 cv2.destroyAllWindows()
 conn.close()

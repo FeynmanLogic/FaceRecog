@@ -13,4 +13,13 @@ We will be using sqlite3 for database purposes.
 <li> Need proper RTSP config
 <li> If person side ways or wearing a cap or some obstruction it is not working
 <li> CNN too slow.
+<li>for combination other than hog and 0.5 resizing it is either extremely slow, feed closing with a snap. for 0.5 and hog, no face is detected, forget recognizing
 </ul>
+
+# Comparison of different models
+
+| Model name   | Accuracy | Time         |
+|------------|-----|--------------|
+| HOG      | Low  | Low    |
+| CNN        | Better  | Higher     |
+| Deepface    | Best  | Highest       |
